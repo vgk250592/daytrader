@@ -1,0 +1,34 @@
+
+How to get a Reddit API refresh token (one-time):
+
+1) Create a Reddit app
+   - Go to https://www.reddit.com/prefs/apps
+   - Click "create another app"
+   - Name: RedditScanner (anything)
+   - Type: installed app
+   - Redirect URI: http://localhost:8080
+   - Save. Copy the Client ID (under the app name) and Client Secret.
+
+2) Authorize manually to get a temporary code:
+   - Open this in your browser (replace YOUR_CLIENT_ID):
+     https://www.reddit.com/api/v1/authorize?client_id=YOUR_CLIENT_ID&response_type=code&state=abc&redirect_uri=http://localhost:8080&duration=permanent&scope=read
+
+   - Click "Allow". It will try to open http://localhost:8080/?state=abc&code=XXXX
+     Copy the `code` value from the address bar.
+
+3) Exchange the code for a refresh token:
+   - Use a tool like curl or Postman:
+     POST https://www.reddit.com/api/v1/access_token
+     Auth type: Basic
+       username: YOUR_CLIENT_ID
+       password: YOUR_CLIENT_SECRET
+     Body: application/x-www-form-urlencoded
+       grant_type=authorization_code
+       code=THE_CODE_YOU_COPIED
+       redirect_uri=http://localhost:8080
+
+   - The JSON response includes "refresh_token". Copy it into your .env as REDDIT_REFRESH_TOKEN.
+
+Notes:
+- Make sure your app type is "installed app" and the redirect URI matches exactly.
+- Scopes needed: read

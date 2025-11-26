@@ -1,0 +1,15 @@
+
+Run these in your project folder after unzipping this pack:
+
+1) Install packages:
+   npm i axios vader-sentiment yahoo-finance2
+
+2) Create/Update .env (project root) with:
+   REDDIT_CLIENT_ID=your_id
+   REDDIT_CLIENT_SECRET=your_secret
+   REDDIT_REFRESH_TOKEN=your_refresh_token
+
+3) Start:
+   npm run dev
+
+If you don't have a Reddit refresh token yet, see HOW_TO_GET_REDDIT_REFRESH_TOKEN.txt
