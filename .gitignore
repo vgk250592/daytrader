@@ -23,3 +23,6 @@ yarn-error.log*
 
 # next
 out/
+
+# Database
+data/

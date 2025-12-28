@@ -184,6 +184,9 @@ export async function runDailyScan(): Promise<ScanResult[]> {
         atrPct: Number(atrPct.toFixed(3)),
         newsCount: 0,
         trend5Day: Number(marketData.trend5Day.toFixed(2)),
+        price: marketData.price,
+        changePercent: Number(marketData.gapPercent.toFixed(2)),
+        volume: marketData.volume,
         list,
         rationale: marketData.price > 0 
           ? "Reddit buzz + sentiment + Polygon.io market data" 

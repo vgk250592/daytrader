@@ -20,6 +20,7 @@ if (!process.env.REDDIT_CLIENT_ID || !process.env.REDDIT_REFRESH_TOKEN) {
 }
 
 import { saveScanResults } from './cache-manager';
+import { saveScan } from './database';
 
 /**
  * Run the daily scan and save results to cache
@@ -39,7 +40,12 @@ export async function runAutomatedScan(scanTime: string): Promise<void> {
     // Save to cache
     await saveScanResults(results, scanTime);
     
-    console.log(`\n✅ Automated scan complete: ${results.length} tickers cached`);
+    // Save to database
+    const scanDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    saveScan(scanDate, scanTime, results);
+    console.log(`✅ Saved to database: ${scanDate}`);
+    
+    console.log(`\n✅ Automated scan complete: ${results.length} tickers cached and stored`);
   } catch (error) {
     console.error(`\n❌ Automated scan failed:`, error);
     throw error; // Re-throw so cron runner knows it failed

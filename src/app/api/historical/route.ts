@@ -3,25 +3,32 @@
 
 import { NextResponse } from "next/server";
 import dayjs from "dayjs";
-import { loadScanResults } from "@/server/cache-manager";
+import { getRecentScans, stockRecordToTickerFeature } from "@/server/database";
 
 export async function GET() {
   try {
-    // Load today's real scan results
-    const cache = await loadScanResults();
+    // Get last 30 days of scans from database
+    const recentScans = getRecentScans(30);
     
-    // Generate 30 days of historical data
+    console.log(`📊 Loaded ${recentScans.length} historical scans from database`);
+    
+    // Generate 30 days array
     const days = 30;
     const today = dayjs();
     
     const historicalData = Array.from({ length: days }, (_, i) => {
       const date = today.subtract(days - 1 - i, 'day');
-      const isToday = i === days - 1;
+      const dateStr = date.format('YYYY-MM-DD');
       
-      // For today, use real cached data if available
-      if (isToday && cache && cache.data && cache.data.length > 0) {
+      // Find scan for this date in database
+      const scanData = recentScans.find(s => s.scan.scan_date === dateStr);
+      
+      if (scanData && scanData.stocks.length > 0) {
+        // Real data from database
+        const tickers = scanData.stocks.map(stockRecordToTickerFeature);
+        
         // Get top 3 buzzed stocks with their REAL summaries
-        const topBuzzed = cache.data
+        const topBuzzed = tickers
           .sort((a, b) => b.buzzZ - a.buzzZ)
           .slice(0, 3)
           .map((item, index) => ({
@@ -32,25 +39,25 @@ export async function GET() {
             redditSummary: item.redditSummary || null,
           }));
 
-        // Get top 3 gainers (by gap%)
-        const topGainers = cache.data
-          .filter(item => item.gapPct > 0)
-          .sort((a, b) => b.gapPct - a.gapPct)
+        // Get top 3 gainers (by changePercent)
+        const topGainers = tickers
+          .filter(item => item.changePercent && item.changePercent > 0)
+          .sort((a, b) => (b.changePercent || 0) - (a.changePercent || 0))
           .slice(0, 3)
           .map(item => ({
             ticker: item.ticker,
-            gain: item.gapPct.toFixed(1),
+            gain: (item.changePercent || 0).toFixed(1),
             wasBuzzed: topBuzzed.some(b => b.ticker === item.ticker),
           }));
 
-        // Get top 3 losers (by gap%)
-        const topLosers = cache.data
-          .filter(item => item.gapPct < 0)
-          .sort((a, b) => a.gapPct - b.gapPct)
+        // Get top 3 losers (by changePercent)
+        const topLosers = tickers
+          .filter(item => item.changePercent && item.changePercent < 0)
+          .sort((a, b) => (a.changePercent || 0) - (b.changePercent || 0))
           .slice(0, 3)
           .map(item => ({
             ticker: item.ticker,
-            loss: item.gapPct.toFixed(1),
+            loss: (item.changePercent || 0).toFixed(1),
             wasBuzzed: topBuzzed.some(b => b.ticker === item.ticker),
           }));
 
@@ -61,7 +68,7 @@ export async function GET() {
         ).length;
 
         return {
-          date: date.format('YYYY-MM-DD'),
+          date: dateStr,
           dayOfWeek: date.format('ddd'),
           dayOfMonth: date.format('D'),
           month: date.format('MMM'),
@@ -69,72 +76,40 @@ export async function GET() {
           topGainers,
           topLosers,
           correlationCount: significantMovers,
+          hasRealData: true,
         };
       }
       
-      // For past days, generate mock data (no summaries)
-      const allStocks = ['SLV', 'NVDA', 'TSLA', 'PLTR', 'MSTR', 'AMD', 'AAPL', 'MSFT', 'GOOGL', 'META', 'COIN', 'SOFI', 'RIOT', 'HOOD', 'SNAP'];
-      
-      const shuffled = [...allStocks].sort(() => Math.random() - 0.5);
-      const topBuzzed = shuffled.slice(0, 3).map((ticker, idx) => ({
-        ticker,
-        buzz: Number((0.9 - idx * 0.15).toFixed(2)),
-        rank: idx + 1,
-        sentiment: Math.random() * 2 - 1,
-        redditSummary: null, // No summaries for past days
-      }));
-      
-      const gainers = [...allStocks].sort(() => Math.random() - 0.5).slice(0, 3).map((ticker, idx) => {
-        const wasBuzzed = topBuzzed.some(b => b.ticker === ticker);
-        return {
-          ticker,
-          gain: Number((25 - idx * 5 - Math.random() * 3).toFixed(1)),
-          rank: idx + 1,
-          wasBuzzed,
-        };
-      });
-      
-      const losers = [...allStocks]
-        .filter(t => !gainers.some(g => g.ticker === t))
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3)
-        .map((ticker, idx) => {
-          const wasBuzzed = topBuzzed.some(b => b.ticker === ticker);
-          return {
-            ticker,
-            loss: Number((-15 + idx * 3 + Math.random() * 2).toFixed(1)),
-            rank: idx + 1,
-            wasBuzzed,
-          };
-        });
-      
-      const buzzedTickers = topBuzzed.map(b => b.ticker);
-      const performerTickers = [...gainers.map(g => g.ticker), ...losers.map(l => l.ticker)];
-      const correlationCount = buzzedTickers.filter(t => performerTickers.includes(t)).length;
-      
+      // No data for this date - return placeholder
       return {
-        date: date.format('YYYY-MM-DD'),
+        date: dateStr,
         dayOfWeek: date.format('ddd'),
         dayOfMonth: date.format('D'),
         month: date.format('MMM'),
-        topBuzzed,
-        topGainers: gainers,
-        topLosers: losers,
-        correlationCount,
+        topBuzzed: [],
+        topGainers: [],
+        topLosers: [],
+        correlationCount: 0,
+        hasRealData: false,
       };
     });
     
-    const totalBuzzed = days * 3;
-    const totalCorrelated = historicalData.reduce((sum, d) => sum + d.correlationCount, 0);
-    const correlationRate = totalCorrelated / totalBuzzed;
+    // Calculate correlation rate from real data only
+    const daysWithData = historicalData.filter(d => d.hasRealData);
+    const totalBuzzed = daysWithData.length * 3;
+    const totalCorrelated = daysWithData.reduce((sum, d) => sum + d.correlationCount, 0);
+    const correlationRate = totalBuzzed > 0 ? totalCorrelated / totalBuzzed : 0;
     
     return NextResponse.json({
       success: true,
       data: historicalData,
       summary: {
         totalDays: days,
+        daysWithRealData: daysWithData.length,
         correlationRate: Number(correlationRate.toFixed(2)),
-        averageCorrelatedPerDay: Number((totalCorrelated / days).toFixed(1)),
+        averageCorrelatedPerDay: daysWithData.length > 0 
+          ? Number((totalCorrelated / daysWithData.length).toFixed(1))
+          : 0,
       }
     });
     

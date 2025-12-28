@@ -12,6 +12,9 @@ export type TickerFeature = {
   list: "DAY_TRADE" | "SWING";
   rationale: string;
   trend5Day?: number; // 5-day price change percentage
+  price?: number; // Current stock price
+  changePercent?: number; // Daily price change percentage
+  volume?: number; // Trading volume
   redditSummary?: {
     summary: string;
     bullishPoints: string[];
