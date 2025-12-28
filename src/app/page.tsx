@@ -5,37 +5,41 @@ import type { TickerFeature } from "@/lib/types";
 
 export default function Page() {
   const [data, setData] = useState<TickerFeature[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+  const [scanTime, setScanTime] = useState<string | null>(null);
 
-  async function runDaily() {
-  setLoading(true);
-  setErr(null);
-  try {
-    const res = await fetch("/api/run-daily", { method: "POST" });
-    const ct = res.headers.get("content-type") || "";
-    const data = ct.includes("application/json")
-      ? await res.json()
-      : { error: await res.text() };            // <-- show HTML error text
+  async function loadData() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/run-daily", { method: "POST" });
+      const ct = res.headers.get("content-type") || "";
+      const data = ct.includes("application/json")
+        ? await res.json()
+        : { error: await res.text() };
 
-    if (!res.ok) {
-      setErr(typeof data === "string" ? data : (data.error || "Unknown server error"));
+      if (!res.ok) {
+        setErr(typeof data === "string" ? data : (data.error || "Unknown server error"));
+        setData([]);
+        return;
+      }
+      
+      setData(Array.isArray(data.rows) ? data.rows : []);
+      setLastUpdate(data.timestamp || new Date().toISOString());
+      setScanTime(data.scanTime || null);
+    } catch (e: any) {
+      setErr(String(e));
       setData([]);
-      return;
+    } finally {
+      setLoading(false);
     }
-    setData(Array.isArray(data.rows) ? data.rows : []);
-  } catch (e: any) {
-    setErr(String(e));
-    setData([]);
-  } finally {
-    setLoading(false);
   }
-}
 
-
-  // optional: auto-run on first load
+  // Auto-load data on first load
   useEffect(() => {
-    // runDaily();
+    loadData();
   }, []);
 
   const safe = Array.isArray(data) ? data : [];
@@ -60,24 +64,55 @@ export default function Page() {
     return safe.reduce((sum, t) => sum + t.sentiment, 0) / safe.length;
   }, [safe]);
 
+  // Format scan time for display
+  const scanTimeDisplay = scanTime 
+    ? scanTime.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
+    : 'Latest';
+
+  // Format last update time
+  const lastUpdateDisplay = lastUpdate 
+    ? new Date(lastUpdate).toLocaleString()
+    : '';
+
   return (
     <div className="container py-8 space-y-6">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Reddit Stock Scanner</h1>
-          <p className="text-sm text-slate-400">Daily Reddit buzz + sentiment → day trading & swing ideas</p>
+          <p className="text-sm text-slate-400">
+            Daily Reddit buzz + sentiment → day trading & swing ideas
+          </p>
+          {lastUpdateDisplay && (
+            <p className="text-xs text-slate-500 mt-1">
+              📊 {scanTimeDisplay} scan • Last updated: {lastUpdateDisplay}
+            </p>
+          )}
         </div>
         <div className="space-x-2">
-          <button className="btn" onClick={runDaily} disabled={loading}>
-            {loading ? "Running..." : "Run Daily Check"}
+          <button className="btn btn-sm" onClick={loadData} disabled={loading}>
+            {loading ? "Loading..." : "🔄 Refresh"}
           </button>
-          <a className="btn" href="https://www.reddit.com/r/wallstreetbets/" target="_blank" rel="noreferrer">Open Reddit</a>
+          <a className="btn btn-sm" href="https://www.reddit.com/r/wallstreetbets/" target="_blank" rel="noreferrer">
+            Open Reddit
+          </a>
         </div>
       </header>
 
+      {loading && safe.length === 0 && (
+        <div className="card p-4 text-slate-300">
+          <div className="flex items-center gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400"></div>
+            <span>Loading latest scan results...</span>
+          </div>
+        </div>
+      )}
+
       {err && <div className="card p-4 text-red-300">API error: {err}</div>}
+      
       {safe.length === 0 && !err && !loading && (
-        <div className="card p-4 text-slate-300">No tickers yet — click "Run Daily Check".</div>
+        <div className="card p-4 text-slate-300">
+          No scan results available yet. Automated scans run 4x daily at market open, midday, close, and after hours.
+        </div>
       )}
 
       {/* Insights Panel */}
@@ -148,6 +183,7 @@ export default function Page() {
               <li><strong>Swing Candidates</strong>: Medium scores (0.55-0.64) = hold for 1-2 weeks</li>
               <li><strong>Buzz z</strong>: 2.0+ = viral on Reddit, high volume expected</li>
               <li><strong>Sentiment</strong>: Green = bullish, Red = bearish (or short opportunity)</li>
+              <li><strong>Trend</strong>: ↑↑ = strong uptrend, ↓↓ = strong downtrend, → = flat</li>
               <li><strong>⚠️ Warning</strong>: Verify tickers are real stocks before trading. Some may be Reddit slang (e.g., "TLDR", "EPS")</li>
             </ul>
           </div>
@@ -160,7 +196,7 @@ export default function Page() {
       </section>
 
       <footer className="text-xs text-slate-500">
-        Experimental tool. Not financial advice. Paper-trade first.
+        Experimental tool. Not financial advice. Paper-trade first. • Automated scans run 4x daily at 9:30 AM, 12:00 PM, 4:00 PM, and 8:00 PM EST.
       </footer>
     </div>
   );

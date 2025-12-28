@@ -1,7 +1,6 @@
 
 "use client";
 import type { TickerFeature } from "@/lib/types";
-import Sparkline from "./Sparkline";
 import classNames from "classnames";
 
 export default function TickerTable({ rows, title }: { rows: TickerFeature[]; title: string; }) {
@@ -22,26 +21,36 @@ export default function TickerTable({ rows, title }: { rows: TickerFeature[]; ti
               <th className="text-left text-slate-300 font-semibold py-3 px-3">Gap%</th>
               <th className="text-left text-slate-300 font-semibold py-3 px-3">Vol x</th>
               <th className="text-left text-slate-300 font-semibold py-3 px-3">ATR%</th>
-              <th className="text-left text-slate-300 font-semibold py-3 px-3">News</th>
               <th className="text-left text-slate-300 font-semibold py-3 px-3">Trend</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.ticker} className="border-b border-slate-700/30 hover:bg-slate-700/20 transition">
-                <td className="font-semibold py-3 px-3">{r.ticker}</td>
-                <td className="py-3 px-3">{r.score.toFixed(2)}</td>
-                <td className="py-3 px-3">{r.buzzZ.toFixed(2)}</td>
-                <td className={classNames("py-3 px-3", {"text-green-400": r.sentiment > 0, "text-red-400": r.sentiment < 0})}>
-                  {(r.sentiment*100).toFixed(0)}%
-                </td>
-                <td className="py-3 px-3">{(r.gapPct*100).toFixed(1)}%</td>
-                <td className="py-3 px-3">{r.volAbnormal.toFixed(1)}x</td>
-                <td className="py-3 px-3">{(r.atrPct*100).toFixed(1)}%</td>
-                <td className="py-3 px-3">{r.newsCount}</td>
-                <td className="py-3 px-3"><Sparkline data={[0,0.2,0.4,0.1,0.6,0.5,0.8].map(v=>({v}))} /></td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              // Determine trend color based on gap%
+              const gapPct = r.gapPct * 100;
+              const trendColor = gapPct > 2 ? 'text-green-400' : 
+                                 gapPct > 0.5 ? 'text-green-300' :
+                                 gapPct < -2 ? 'text-red-400' :
+                                 gapPct < -0.5 ? 'text-red-300' :
+                                 'text-slate-400';
+              
+              return (
+                <tr key={r.ticker} className="border-b border-slate-700/30 hover:bg-slate-700/20 transition">
+                  <td className="font-semibold py-3 px-3">{r.ticker}</td>
+                  <td className="py-3 px-3">{r.score.toFixed(2)}</td>
+                  <td className="py-3 px-3">{r.buzzZ.toFixed(2)}</td>
+                  <td className={classNames("py-3 px-3", {"text-green-400": r.sentiment > 0, "text-red-400": r.sentiment < 0})}>
+                    {(r.sentiment*100).toFixed(0)}%
+                  </td>
+                  <td className="py-3 px-3">{gapPct.toFixed(1)}%</td>
+                  <td className="py-3 px-3">{r.volAbnormal.toFixed(1)}x</td>
+                  <td className="py-3 px-3">{(r.atrPct*100).toFixed(1)}%</td>
+                  <td className={classNames("py-3 px-3 text-lg", trendColor)}>
+                    {(r as any).trend || '→'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
