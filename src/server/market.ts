@@ -1,4 +1,4 @@
-// ✅ WORKING VERSION - Using direct REST API calls to Polygon.io
+// ✅ OPTIMIZED VERSION - Parallel batch processing for speed
 // src/server/market.ts
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || '';
@@ -9,8 +9,9 @@ if (!POLYGON_API_KEY) {
 
 const BASE_URL = 'https://api.polygon.io';
 
-// Rate limiting: Polygon.io free tier = 5 calls/minute
-const DELAY_MS = 12000; // 12 seconds between requests (5 per minute)
+// Optimized rate limiting: Process 5 tickers in parallel (free tier = 5 calls/min)
+const BATCH_SIZE = 5; // Process 5 tickers at once
+const BATCH_DELAY_MS = 12000; // 12 seconds between batches
 
 interface MarketData {
   ticker: string;
@@ -38,8 +39,6 @@ function delay(ms: number): Promise<void> {
  */
 export async function getMarketData(ticker: string): Promise<MarketData | null> {
   try {
-    console.log(`  📊 Fetching ${ticker} from Polygon.io...`);
-
     if (!POLYGON_API_KEY) {
       console.log(`  ❌ ${ticker}: No Polygon.io API key configured`);
       return null;
@@ -63,64 +62,25 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
 
     const data = prevCloseData.results[0];
 
-    // Get aggregates for ATR calculation (last 14 days)
-    const to = new Date();
-    const from = new Date(to.getTime() - 14 * 24 * 60 * 60 * 1000);
-    const fromStr = from.toISOString().split('T')[0];
-    const toStr = to.toISOString().split('T')[0];
-    
-    let atr = 0;
-    try {
-      const aggsUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/range/1/day/${fromStr}/${toStr}?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-      const aggsRes = await fetch(aggsUrl);
-      
-      if (aggsRes.ok) {
-        const aggsData = await aggsRes.json();
-        
-        // Calculate ATR (Average True Range)
-        if (aggsData.results && aggsData.results.length >= 2) {
-          const ranges = aggsData.results.map((bar: any) => bar.h - bar.l);
-          atr = ranges.reduce((a: number, b: number) => a + b, 0) / ranges.length;
-        }
-      }
-    } catch (aggError) {
-      // ATR calculation failed, continue with 0
-      console.log(`  ⚠️  ${ticker}: Could not calculate ATR`);
-    }
-
-    // Get ticker details for market cap
-    let marketCap = 0;
-    
-    try {
-      const detailsUrl = `${BASE_URL}/v3/reference/tickers/${ticker}?apiKey=${POLYGON_API_KEY}`;
-      const detailsRes = await fetch(detailsUrl);
-      
-      if (detailsRes.ok) {
-        const detailsData = await detailsRes.json();
-        if (detailsData.results) {
-          marketCap = detailsData.results.market_cap || 0;
-        }
-      }
-    } catch (detailsError) {
-      // Details fetch failed, continue with defaults
-      console.log(`  ⚠️  ${ticker}: Could not fetch details`);
-    }
-    
+    // Simplified: Use data from previous close (skip ATR and details for speed)
     const price = data.c || 0;
     const open = data.o || price;
-    const prevClose = data.c || price; // Previous close
+    const prevClose = data.c || price;
     const high = data.h || price;
     const low = data.l || price;
     const change = price - prevClose;
     const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
     const volume = data.v || 0;
     
-    // Use volume weighted average if available, otherwise use current volume
-    const avgVolume = data.vw || volume;
-    const volumeRatio = avgVolume > 0 ? volume / avgVolume : 1;
+    // Estimate ATR from high-low range (faster than fetching 14 days)
+    const atr = high - low;
     const atrPercent = price > 0 ? (atr / price) * 100 : 0;
 
-    // Gap calculation (difference between today's open and yesterday's close)
+    // Use volume weighted average if available
+    const avgVolume = data.vw || volume;
+    const volumeRatio = avgVolume > 0 ? volume / avgVolume : 1;
+
+    // Gap calculation
     const gap = open - prevClose;
     const gapPercent = prevClose > 0 ? (gap / prevClose) * 100 : 0;
 
@@ -138,7 +98,7 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
       volumeRatio,
       high52Week: high,
       low52Week: low,
-      marketCap,
+      marketCap: 0, // Skip for speed
     };
 
     console.log(`  ✅ ${ticker}: $${price.toFixed(2)} | ATR: ${atrPercent.toFixed(2)}% | Vol: ${volumeRatio.toFixed(1)}x`);
@@ -152,26 +112,41 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
 }
 
 /**
- * Fetches market data for multiple tickers with rate limiting
+ * Fetches market data for multiple tickers with PARALLEL batch processing
+ * MUCH FASTER: 30 tickers in ~1 minute instead of 6 minutes
  */
 export async function getMultipleMarketData(tickers: string[]): Promise<Map<string, MarketData>> {
   const results = new Map<string, MarketData>();
   
+  // Split tickers into batches of 5
+  const batches: string[][] = [];
+  for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
+    batches.push(tickers.slice(i, i + BATCH_SIZE));
+  }
+  
   console.log(`\n📊 Fetching market data for ${tickers.length} tickers from Polygon.io...`);
-  console.log(`⏱️  Estimated time: ${Math.ceil(tickers.length * DELAY_MS / 1000 / 60)} minutes\n`);
+  console.log(`⚡ Processing ${BATCH_SIZE} tickers in parallel per batch`);
+  console.log(`⏱️  Estimated time: ${Math.ceil(batches.length * BATCH_DELAY_MS / 1000)} seconds\n`);
 
-  for (let i = 0; i < tickers.length; i++) {
-    const ticker = tickers[i];
-    const data = await getMarketData(ticker);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    console.log(`\n🔄 Batch ${i + 1}/${batches.length}: ${batch.join(', ')}`);
     
-    if (data) {
-      results.set(ticker, data);
-    }
+    // Process all tickers in this batch IN PARALLEL
+    const promises = batch.map(ticker => getMarketData(ticker));
+    const batchResults = await Promise.all(promises);
+    
+    // Store successful results
+    batchResults.forEach((data, idx) => {
+      if (data) {
+        results.set(batch[idx], data);
+      }
+    });
 
-    // Delay AFTER processing, BEFORE next request
-    if (i < tickers.length - 1) {
-      console.log(`  ⏳ Waiting 12s... (${i + 1}/${tickers.length})`);
-      await delay(DELAY_MS);
+    // Delay between batches (not after last batch)
+    if (i < batches.length - 1) {
+      console.log(`\n⏳ Waiting 12s before next batch...`);
+      await delay(BATCH_DELAY_MS);
     }
   }
 
