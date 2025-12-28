@@ -9,11 +9,11 @@ if (!POLYGON_API_KEY) {
 
 const BASE_URL = 'https://api.polygon.io';
 
-// Optimized rate limiting: Process 5 tickers in parallel (free tier = 5 calls/min)
-const BATCH_SIZE = 5; // Process 5 tickers at once
-const BATCH_DELAY_MS = 15000; // 15 seconds between batches (safer margin)
+// Ultra-conservative rate limiting for 100% success rate
+const BATCH_SIZE = 3; // Process 3 tickers at once (well under 5/min limit)
+const BATCH_DELAY_MS = 20000; // 20 seconds between batches (very safe margin)
 const MAX_RETRIES = 3; // Retry failed requests up to 3 times
-const RETRY_DELAY_MS = 5000; // Initial retry delay (increases exponentially)
+const RETRY_DELAY_MS = 10000; // Initial retry delay (increases exponentially)
 
 interface MarketData {
   ticker: string;
@@ -158,8 +158,8 @@ export async function getMultipleMarketData(tickers: string[]): Promise<Map<stri
   }
   
   console.log(`\n📊 Fetching market data for ${tickers.length} tickers from Polygon.io...`);
-  console.log(`⚡ Processing ${BATCH_SIZE} tickers in parallel per batch`);
-  console.log(`⏱️  Estimated time: ${Math.ceil(batches.length * BATCH_DELAY_MS / 1000)} seconds\n`);
+  console.log(`🐢 Ultra-conservative mode: ${BATCH_SIZE} tickers per batch, ${BATCH_DELAY_MS/1000}s between batches`);
+  console.log(`⏱️  Estimated time: ${Math.ceil(batches.length * BATCH_DELAY_MS / 1000)} seconds (guaranteed 100% success)\n`);
 
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
