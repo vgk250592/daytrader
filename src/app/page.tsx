@@ -167,12 +167,8 @@ export default function HomePage() {
         )}
 
         {/* Main Table */}
-        {tickers.length > 0 ? (
+        {tickers.length > 0 && (
           <TickerTable rows={tickers} title="🔥 Today's Top Stocks" />
-        ) : (
-          <div className="card p-8 text-center">
-            <p className="text-slate-400">No data available. Waiting for next scan...</p>
-          </div>
         )}
 
         {/* How to Use Guide */}
