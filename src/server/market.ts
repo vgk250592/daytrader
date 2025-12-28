@@ -11,7 +11,9 @@ const BASE_URL = 'https://api.polygon.io';
 
 // Optimized rate limiting: Process 5 tickers in parallel (free tier = 5 calls/min)
 const BATCH_SIZE = 5; // Process 5 tickers at once
-const BATCH_DELAY_MS = 12000; // 12 seconds between batches
+const BATCH_DELAY_MS = 15000; // 15 seconds between batches (safer margin)
+const MAX_RETRIES = 3; // Retry failed requests up to 3 times
+const RETRY_DELAY_MS = 5000; // Initial retry delay (increases exponentially)
 
 interface MarketData {
   ticker: string;
@@ -36,9 +38,9 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Fetches market data for a single ticker using Polygon.io REST API
+ * Fetches market data for a single ticker using Polygon.io REST API with retry logic
  */
-export async function getMarketData(ticker: string): Promise<MarketData | null> {
+export async function getMarketData(ticker: string, retryCount: number = 0): Promise<MarketData | null> {
   try {
     if (!POLYGON_API_KEY) {
       console.log(`  ❌ ${ticker}: No Polygon.io API key configured`);
@@ -53,6 +55,19 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
     const aggregatesUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/range/1/day/${startDate.toISOString().split('T')[0]}/${endDate.toISOString().split('T')[0]}?adjusted=true&sort=desc&limit=10&apiKey=${POLYGON_API_KEY}`;
     
     const aggregatesRes = await fetch(aggregatesUrl);
+    
+    // Handle 429 rate limit errors with retry
+    if (aggregatesRes.status === 429) {
+      if (retryCount < MAX_RETRIES) {
+        const retryDelay = RETRY_DELAY_MS * Math.pow(2, retryCount); // Exponential backoff
+        console.log(`  ⚠️  ${ticker}: Rate limited (429), retrying in ${retryDelay/1000}s... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        await delay(retryDelay);
+        return getMarketData(ticker, retryCount + 1);
+      } else {
+        console.log(`  ❌ ${ticker}: Rate limit exceeded after ${MAX_RETRIES} retries`);
+        return null;
+      }
+    }
     
     if (!aggregatesRes.ok) {
       console.log(`  ⚠️  ${ticker}: API returned ${aggregatesRes.status}`);
@@ -163,7 +178,7 @@ export async function getMultipleMarketData(tickers: string[]): Promise<Map<stri
 
     // Delay between batches (not after last batch)
     if (i < batches.length - 1) {
-      console.log(`\n⏳ Waiting 12s before next batch...`);
+      console.log(`\n⏳ Waiting ${BATCH_DELAY_MS/1000}s before next batch...`);
       await delay(BATCH_DELAY_MS);
     }
   }
