@@ -1,7 +1,5 @@
-// ✅ FIXED VERSION - Using correct Polygon.io client-js API
+// ✅ WORKING VERSION - Using direct REST API calls to Polygon.io
 // src/server/market.ts
-
-import { restClient } from '@polygon.io/client-js';
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || '';
 
@@ -9,8 +7,7 @@ if (!POLYGON_API_KEY) {
   console.error('❌ POLYGON_API_KEY not found in environment variables');
 }
 
-// Initialize Polygon.io REST client
-const rest = restClient(POLYGON_API_KEY);
+const BASE_URL = 'https://api.polygon.io';
 
 // Rate limiting: Polygon.io free tier = 5 calls/minute
 const DELAY_MS = 12000; // 12 seconds between requests (5 per minute)
@@ -37,7 +34,7 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Fetches market data for a single ticker using Polygon.io API
+ * Fetches market data for a single ticker using Polygon.io REST API
  */
 export async function getMarketData(ticker: string): Promise<MarketData | null> {
   try {
@@ -49,33 +46,42 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
     }
 
     // Get previous day's close data
-    const prevCloseResponse = await rest.stocks.previousClose(ticker);
+    const prevCloseUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+    const prevCloseRes = await fetch(prevCloseUrl);
     
-    if (!prevCloseResponse || !prevCloseResponse.results || prevCloseResponse.results.length === 0) {
+    if (!prevCloseRes.ok) {
+      console.log(`  ⚠️  ${ticker}: API returned ${prevCloseRes.status}`);
+      return null;
+    }
+
+    const prevCloseData = await prevCloseRes.json();
+    
+    if (!prevCloseData.results || prevCloseData.results.length === 0) {
       console.log(`  ⚠️  ${ticker}: No data from Polygon.io`);
       return null;
     }
 
-    const data = prevCloseResponse.results[0];
+    const data = prevCloseData.results[0];
 
     // Get aggregates for ATR calculation (last 14 days)
     const to = new Date();
     const from = new Date(to.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const fromStr = from.toISOString().split('T')[0];
+    const toStr = to.toISOString().split('T')[0];
     
     let atr = 0;
     try {
-      const aggsResponse = await rest.stocks.aggregates(
-        ticker,
-        1,
-        'day',
-        from.toISOString().split('T')[0],
-        to.toISOString().split('T')[0]
-      );
-
-      // Calculate ATR (Average True Range)
-      if (aggsResponse && aggsResponse.results && aggsResponse.results.length >= 2) {
-        const ranges = aggsResponse.results.map((bar: any) => bar.h - bar.l);
-        atr = ranges.reduce((a: number, b: number) => a + b, 0) / ranges.length;
+      const aggsUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/range/1/day/${fromStr}/${toStr}?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+      const aggsRes = await fetch(aggsUrl);
+      
+      if (aggsRes.ok) {
+        const aggsData = await aggsRes.json();
+        
+        // Calculate ATR (Average True Range)
+        if (aggsData.results && aggsData.results.length >= 2) {
+          const ranges = aggsData.results.map((bar: any) => bar.h - bar.l);
+          atr = ranges.reduce((a: number, b: number) => a + b, 0) / ranges.length;
+        }
       }
     } catch (aggError) {
       // ATR calculation failed, continue with 0
@@ -86,9 +92,14 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
     let marketCap = 0;
     
     try {
-      const detailsResponse = await rest.reference.tickerDetails(ticker);
-      if (detailsResponse && detailsResponse.results) {
-        marketCap = detailsResponse.results.market_cap || 0;
+      const detailsUrl = `${BASE_URL}/v3/reference/tickers/${ticker}?apiKey=${POLYGON_API_KEY}`;
+      const detailsRes = await fetch(detailsUrl);
+      
+      if (detailsRes.ok) {
+        const detailsData = await detailsRes.json();
+        if (detailsData.results) {
+          marketCap = detailsData.results.market_cap || 0;
+        }
       }
     } catch (detailsError) {
       // Details fetch failed, continue with defaults
@@ -98,12 +109,14 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
     const price = data.c || 0;
     const open = data.o || price;
     const prevClose = data.c || price; // Previous close
+    const high = data.h || price;
+    const low = data.l || price;
     const change = price - prevClose;
     const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
     const volume = data.v || 0;
     
-    // Use 30-day average volume if available, otherwise use current volume
-    const avgVolume = data.vw || volume; // vw = volume weighted average
+    // Use volume weighted average if available, otherwise use current volume
+    const avgVolume = data.vw || volume;
     const volumeRatio = avgVolume > 0 ? volume / avgVolume : 1;
     const atrPercent = price > 0 ? (atr / price) * 100 : 0;
 
@@ -123,8 +136,8 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
       gap,
       gapPercent,
       volumeRatio,
-      high52Week: data.h || 0,
-      low52Week: data.l || 0,
+      high52Week: high,
+      low52Week: low,
       marketCap,
     };
 
