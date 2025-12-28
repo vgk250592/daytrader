@@ -2,13 +2,24 @@
 import { useState, useEffect, useRef } from "react";
 import classNames from "classnames";
 
+interface RedditSummary {
+  summary: string;
+  bullishPoints: string[];
+  bearishPoints: string[];
+  keyQuotes: string[];
+  overallSentiment: 'bullish' | 'bearish' | 'neutral';
+  postLinks: string[];
+}
+
 interface StockItem {
   ticker: string;
   rank: number;
   buzz?: number;
+  sentiment?: number;
   gain?: number;
   loss?: number;
   wasBuzzed?: boolean;
+  redditSummary?: RedditSummary | null;
 }
 
 interface DayData {
@@ -131,7 +142,7 @@ export default function TimelineCarousel() {
         )}
 
         {/* Carousel Container - Fixed Height, No Vertical Scroll */}
-        <div className="px-12">
+        <div className="px-12 py-4">
           <div 
             ref={scrollContainerRef}
             className="flex gap-4 overflow-x-hidden"
@@ -262,43 +273,50 @@ export default function TimelineCarousel() {
 
                   {/* Comprehensive Reddit Summary */}
                   <div className="space-y-3">
-                    <div className="text-sm text-slate-300 leading-relaxed">
-                      <p className="mb-3">
-                        <span className="font-semibold text-white">Community Discussion:</span> Traders on r/wallstreetbets are 
-                        showing {stock.buzz && stock.buzz > 0.8 ? 'extremely high' : stock.buzz && stock.buzz > 0.6 ? 'significant' : 'moderate'} interest 
-                        in {stock.ticker}. The overall sentiment is <span className={sentiment === 'bullish' ? 'text-green-400' : 'text-red-400'}>
-                          {sentiment}
-                        </span>, with discussions focusing on recent price action and potential catalysts.
-                      </p>
-                      
-                      <p className="mb-3">
-                        <span className="font-semibold text-white">Key Themes:</span> {sentiment === 'bullish' 
-                          ? `Community members are optimistic about ${stock.ticker}'s momentum, citing strong technical indicators and positive market sentiment. Many traders are watching for breakout opportunities.`
-                          : `Concerns are being raised about ${stock.ticker}'s recent performance, with traders discussing potential downside risks and profit-taking opportunities. Caution is advised.`
-                        }
-                      </p>
-                    </div>
-
-                    {/* Top Comments */}
-                    <div className="bg-slate-800/50 rounded p-3 border border-slate-700">
-                      <div className="text-xs font-semibold text-blue-400 mb-2">💬 Notable Comments</div>
-                      <div className="space-y-2 text-xs text-slate-300">
-                        <p className="italic">"This stock is getting massive attention. Volume is through the roof."</p>
-                        <p className="italic">"Watch for volatility - this could move fast in either direction."</p>
-                        <p className="italic">"Community sentiment is strong, but always do your own research."</p>
+                    {stock.redditSummary ? (
+                      <div className="text-sm text-slate-300 leading-relaxed">
+                        <p className="mb-3">
+                          <span className="font-semibold text-white">What Reddit Says:</span> {stock.redditSummary.summary}
+                        </p>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="text-sm text-slate-300 leading-relaxed">
+                        <p className="mb-3">
+                          <span className="font-semibold text-white">Community Discussion:</span> Traders on r/wallstreetbets are 
+                          showing {stock.buzz && stock.buzz > 0.8 ? 'extremely high' : stock.buzz && stock.buzz > 0.6 ? 'significant' : 'moderate'} interest 
+                          in {stock.ticker}. The overall sentiment is <span className={sentiment === 'bullish' ? 'text-green-400' : 'text-red-400'}>
+                            {sentiment}
+                          </span>, with discussions focusing on recent price action and potential catalysts.
+                        </p>
+                      </div>
+                    )}
+
+
 
                     {/* Links */}
                     <div className="flex gap-2">
-                      <a 
-                        href={`https://www.reddit.com/r/wallstreetbets/search?q=${stock.ticker}&restrict_sr=1&sort=hot`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/30 text-blue-300 px-3 py-1.5 rounded transition"
-                      >
-                        View on Reddit →
-                      </a>
+                      {stock.redditSummary && stock.redditSummary.postLinks && stock.redditSummary.postLinks.length > 0 ? (
+                        stock.redditSummary.postLinks.slice(0, 3).map((link, idx) => (
+                          <a 
+                            key={idx}
+                            href={`https://reddit.com${link}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/30 text-blue-300 px-3 py-1.5 rounded transition"
+                          >
+                            Discussion {idx + 1} →
+                          </a>
+                        ))
+                      ) : (
+                        <a 
+                          href={`https://www.reddit.com/r/wallstreetbets/search?q=${stock.ticker}&restrict_sr=1&sort=hot`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/30 text-blue-300 px-3 py-1.5 rounded transition"
+                        >
+                          View on Reddit →
+                        </a>
+                      )}
                     </div>
                   </div>
                 </div>
