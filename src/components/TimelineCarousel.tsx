@@ -142,7 +142,7 @@ export default function TimelineCarousel() {
         )}
 
         {/* Carousel Container - Fixed Height, No Vertical Scroll */}
-        <div className="px-12 py-4">
+        <div className="px-12 py-8">
           <div 
             ref={scrollContainerRef}
             className="flex gap-4 overflow-x-hidden"
@@ -293,31 +293,7 @@ export default function TimelineCarousel() {
 
 
 
-                    {/* Links */}
-                    <div className="flex gap-2">
-                      {stock.redditSummary && stock.redditSummary.postLinks && stock.redditSummary.postLinks.length > 0 ? (
-                        stock.redditSummary.postLinks.slice(0, 3).map((link, idx) => (
-                          <a 
-                            key={idx}
-                            href={`https://reddit.com${link}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/30 text-blue-300 px-3 py-1.5 rounded transition"
-                          >
-                            Discussion {idx + 1} →
-                          </a>
-                        ))
-                      ) : (
-                        <a 
-                          href={`https://www.reddit.com/r/wallstreetbets/search?q=${stock.ticker}&restrict_sr=1&sort=hot`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/30 text-blue-300 px-3 py-1.5 rounded transition"
-                        >
-                          View on Reddit →
-                        </a>
-                      )}
-                    </div>
+
                   </div>
                 </div>
               );
