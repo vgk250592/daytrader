@@ -1,4 +1,4 @@
-// ✅ OPTIMIZED VERSION - Parallel batch processing for speed
+// Market data fetching with Polygon.io REST API
 // src/server/market.ts
 
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || '';
@@ -28,6 +28,7 @@ interface MarketData {
   high52Week: number;
   low52Week: number;
   marketCap: number;
+  trend5Day: number; // 5-day price change percentage
 }
 
 function delay(ms: number): Promise<void> {
@@ -44,43 +45,59 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
       return null;
     }
 
-    // Get previous day's close data
-    const prevCloseUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-    const prevCloseRes = await fetch(prevCloseUrl);
+    // Get 5 days of data for trend calculation
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7); // Get 7 days to ensure we have 5 trading days
+
+    const aggregatesUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/range/1/day/${startDate.toISOString().split('T')[0]}/${endDate.toISOString().split('T')[0]}?adjusted=true&sort=desc&limit=10&apiKey=${POLYGON_API_KEY}`;
     
-    if (!prevCloseRes.ok) {
-      console.log(`  ⚠️  ${ticker}: API returned ${prevCloseRes.status}`);
+    const aggregatesRes = await fetch(aggregatesUrl);
+    
+    if (!aggregatesRes.ok) {
+      console.log(`  ⚠️  ${ticker}: API returned ${aggregatesRes.status}`);
       return null;
     }
 
-    const prevCloseData = await prevCloseRes.json();
+    const aggregatesData = await aggregatesRes.json();
     
-    if (!prevCloseData.results || prevCloseData.results.length === 0) {
+    if (!aggregatesData.results || aggregatesData.results.length === 0) {
       console.log(`  ⚠️  ${ticker}: No data from Polygon.io`);
       return null;
     }
 
-    const data = prevCloseData.results[0];
+    const results = aggregatesData.results;
+    const latestDay = results[0];
+    
+    // Calculate 5-day trend if we have enough data
+    let trend5Day = 0;
+    if (results.length >= 5) {
+      const day5Close = results[4].c;
+      const latestClose = latestDay.c;
+      trend5Day = day5Close > 0 ? ((latestClose - day5Close) / day5Close) * 100 : 0;
+    }
 
-    // Simplified: Use data from previous close (skip ATR and details for speed)
-    const price = data.c || 0;
-    const open = data.o || price;
-    const prevClose = data.c || price;
-    const high = data.h || price;
-    const low = data.l || price;
+    // Calculate average volume from last 5 days
+    const avgVolume = results.length > 0
+      ? results.slice(0, Math.min(5, results.length)).reduce((sum: number, day: any) => sum + (day.v || 0), 0) / Math.min(5, results.length)
+      : latestDay.v || 0;
+
+    const price = latestDay.c || 0;
+    const open = latestDay.o || price;
+    const prevClose = results.length > 1 ? results[1].c : latestDay.c;
+    const high = latestDay.h || price;
+    const low = latestDay.l || price;
     const change = price - prevClose;
     const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
-    const volume = data.v || 0;
+    const volume = latestDay.v || 0;
     
-    // Estimate ATR from high-low range (faster than fetching 14 days)
+    // Estimate ATR from high-low range
     const atr = high - low;
     const atrPercent = price > 0 ? (atr / price) * 100 : 0;
 
-    // Use volume weighted average if available
-    const avgVolume = data.vw || volume;
     const volumeRatio = avgVolume > 0 ? volume / avgVolume : 1;
 
-    // Gap calculation
+    // Gap calculation (open vs previous close)
     const gap = open - prevClose;
     const gapPercent = prevClose > 0 ? (gap / prevClose) * 100 : 0;
 
@@ -99,9 +116,10 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
       high52Week: high,
       low52Week: low,
       marketCap: 0, // Skip for speed
+      trend5Day,
     };
 
-    console.log(`  ✅ ${ticker}: $${price.toFixed(2)} | ATR: ${atrPercent.toFixed(2)}% | Vol: ${volumeRatio.toFixed(1)}x`);
+    console.log(`  ✅ ${ticker}: $${price.toFixed(2)} | ATR: ${atrPercent.toFixed(2)}% | Vol: ${volumeRatio.toFixed(1)}x | Trend: ${trend5Day >= 0 ? '+' : ''}${trend5Day.toFixed(1)}%`);
     
     return marketData;
 
@@ -174,5 +192,6 @@ export function createFallbackMarketData(ticker: string): MarketData {
     high52Week: 0,
     low52Week: 0,
     marketCap: 0,
+    trend5Day: 0,
   };
 }

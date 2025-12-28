@@ -1,11 +1,12 @@
-// Reusable scan logic - can be called from API or cron job
+// Core scanning logic - extracted for reuse
 // src/server/scan-logic.ts
 
-import { fetchRedditPosts } from "./reddit";
+import { fetchRedditPosts, getTickerDiscussion, type RedditPost } from "./reddit";
 import { aggregateTickerMentions } from "./tickers";
 import { getMultipleMarketData, createFallbackMarketData } from "./market";
 import { filterTickers } from "./ticker-validator";
 import { compositeScore } from "./score";
+import { batchSummarizeDiscussions } from "./ai-summarizer";
 import vader from "vader-sentiment";
 
 export interface ScanResult {
@@ -18,9 +19,17 @@ export interface ScanResult {
   volAbnormal: number;
   atrPct: number;
   newsCount: number;
-  trend: string;
+  trend5Day: number;
   list: string;
   rationale: string;
+  redditSummary?: {
+    summary: string;
+    bullishPoints: string[];
+    bearishPoints: string[];
+    keyQuotes: string[];
+    overallSentiment: 'bullish' | 'bearish' | 'neutral';
+    postLinks: string[];
+  };
 }
 
 /**
@@ -32,7 +41,7 @@ export async function runDailyScan(): Promise<ScanResult[]> {
   
   // 1) fetch reddit data
   console.log("📡 Fetching Reddit posts...");
-  const posts = await fetchRedditPosts("wallstreetbets", 100);
+  const posts: RedditPost[] = await fetchRedditPosts("wallstreetbets", 100);
   console.log(`✓ Fetched ${posts.length} posts`);
 
   if (!posts || posts.length === 0) {
@@ -111,8 +120,28 @@ export async function runDailyScan(): Promise<ScanResult[]> {
     console.warn("⚠️  No market data fetched - check Polygon.io API key");
   }
 
-  // 6) score + classify
-  console.log("🎯 Scoring and classifying tickers...");
+  // 6) Fetch Reddit discussions and generate AI summaries
+  console.log("\n💬 Fetching Reddit discussions for top tickers...");
+  const discussionPromises = topReddit.slice(0, 10).map(async (r) => {
+    const discussion = await getTickerDiscussion(r.ticker, posts);
+    return {
+      ticker: r.ticker,
+      postTitles: discussion.posts.map(p => p.title),
+      comments: discussion.topComments,
+      postLinks: discussion.posts.map(p => p.permalink),
+    };
+  });
+
+  const discussions = await Promise.all(discussionPromises);
+  console.log(`✓ Fetched discussions for ${discussions.length} tickers`);
+
+  // 7) Generate AI summaries
+  console.log("\n🤖 Generating AI summaries...");
+  const summariesMap = await batchSummarizeDiscussions(discussions);
+  console.log(`✓ Generated ${summariesMap.size} AI summaries`);
+
+  // 8) score + classify
+  console.log("\n🎯 Scoring and classifying tickers...");
   const rows = topReddit
     .map(r => {
       // Get market data or use fallback
@@ -141,13 +170,9 @@ export async function runDailyScan(): Promise<ScanResult[]> {
         score >= 0.65 ? "DAY_TRADE" :
         score >= 0.55 && atrPct < 0.12 ? "SWING" : "SWING";
 
-      // Calculate trend (up/down/flat based on gap%)
-      const gapPct = marketData.gapPercent;
-      let trend = "→"; // flat
-      if (gapPct > 2) trend = "↑↑"; // strong up
-      else if (gapPct > 0.5) trend = "↑"; // up
-      else if (gapPct < -2) trend = "↓↓"; // strong down
-      else if (gapPct < -0.5) trend = "↓"; // down
+      // Get Reddit summary if available
+      const summary = summariesMap.get(r.ticker);
+      const discussion = discussions.find(d => d.ticker === r.ticker);
 
       return {
         ticker: r.ticker,
@@ -158,12 +183,20 @@ export async function runDailyScan(): Promise<ScanResult[]> {
         vwapRel: 1,
         volAbnormal: Number(marketData.volumeRatio.toFixed(2)),
         atrPct: Number(atrPct.toFixed(3)),
-        newsCount: 0, // Remove this field
-        trend, // Now shows actual trend
+        newsCount: 0,
+        trend5Day: Number(marketData.trend5Day.toFixed(2)),
         list,
         rationale: marketData.price > 0 
           ? "Reddit buzz + sentiment + Polygon.io market data" 
-          : "Reddit buzz + sentiment only (no market data)"
+          : "Reddit buzz + sentiment only (no market data)",
+        redditSummary: summary ? {
+          summary: summary.summary,
+          bullishPoints: summary.bullishPoints,
+          bearishPoints: summary.bearishPoints,
+          keyQuotes: summary.keyQuotes,
+          overallSentiment: summary.overallSentiment,
+          postLinks: discussion?.postLinks || [],
+        } : undefined,
       };
     });
 
