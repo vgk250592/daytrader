@@ -142,13 +142,15 @@ export default function TimelineCarousel() {
         )}
 
         {/* Carousel Container - Fixed Height, No Vertical Scroll */}
-        <div className="px-12 py-8">
+        <div className="px-4 py-8">
           <div 
             ref={scrollContainerRef}
-            className="flex gap-4 overflow-x-hidden"
+            className="flex gap-4 overflow-x-hidden overflow-y-visible"
             style={{ 
-              height: '420px', // Fixed height to prevent vertical scroll
-              scrollBehavior: 'smooth'
+              height: '440px', // Fixed height with extra space for hover border
+              scrollBehavior: 'smooth',
+              paddingTop: '10px',
+              paddingBottom: '10px'
             }}
           >
             {data.map((day) => (
