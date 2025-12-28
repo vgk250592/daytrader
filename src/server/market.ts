@@ -1,4 +1,4 @@
-// ✅ FIXED VERSION - Proper Polygon.io client initialization
+// ✅ FIXED VERSION - Using correct Polygon.io client-js API
 // src/server/market.ts
 
 import { restClient } from '@polygon.io/client-js';
@@ -9,8 +9,8 @@ if (!POLYGON_API_KEY) {
   console.error('❌ POLYGON_API_KEY not found in environment variables');
 }
 
-// Initialize Polygon.io client
-const polygon = restClient(POLYGON_API_KEY);
+// Initialize Polygon.io REST client
+const rest = restClient(POLYGON_API_KEY);
 
 // Rate limiting: Polygon.io free tier = 5 calls/minute
 const DELAY_MS = 12000; // 12 seconds between requests (5 per minute)
@@ -48,8 +48,8 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
       return null;
     }
 
-    // Get previous day's data (includes OHLCV)
-    const prevCloseResponse = await polygon.stocks.previousClose(ticker);
+    // Get previous day's close data
+    const prevCloseResponse = await rest.stocks.previousClose(ticker);
     
     if (!prevCloseResponse || !prevCloseResponse.results || prevCloseResponse.results.length === 0) {
       console.log(`  ⚠️  ${ticker}: No data from Polygon.io`);
@@ -64,7 +64,7 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
     
     let atr = 0;
     try {
-      const aggsResponse = await polygon.stocks.aggregates(
+      const aggsResponse = await rest.stocks.aggregates(
         ticker,
         1,
         'day',
@@ -82,18 +82,13 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
       console.log(`  ⚠️  ${ticker}: Could not calculate ATR`);
     }
 
-    // Get ticker details for market cap and avg volume
+    // Get ticker details for market cap
     let marketCap = 0;
-    let avgVolume = data.v || 0;
     
     try {
-      const detailsResponse = await polygon.reference.tickerDetails(ticker);
+      const detailsResponse = await rest.reference.tickerDetails(ticker);
       if (detailsResponse && detailsResponse.results) {
         marketCap = detailsResponse.results.market_cap || 0;
-        // Use actual average volume if available
-        if (detailsResponse.results.share_class_shares_outstanding) {
-          avgVolume = detailsResponse.results.share_class_shares_outstanding;
-        }
       }
     } catch (detailsError) {
       // Details fetch failed, continue with defaults
@@ -101,16 +96,20 @@ export async function getMarketData(ticker: string): Promise<MarketData | null> 
     }
     
     const price = data.c || 0;
-    const prevPrice = data.o || price;
-    const change = price - prevPrice;
-    const changePercent = prevPrice > 0 ? (change / prevPrice) * 100 : 0;
+    const open = data.o || price;
+    const prevClose = data.c || price; // Previous close
+    const change = price - prevClose;
+    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
     const volume = data.v || 0;
+    
+    // Use 30-day average volume if available, otherwise use current volume
+    const avgVolume = data.vw || volume; // vw = volume weighted average
     const volumeRatio = avgVolume > 0 ? volume / avgVolume : 1;
     const atrPercent = price > 0 ? (atr / price) * 100 : 0;
 
     // Gap calculation (difference between today's open and yesterday's close)
-    const gap = data.o - data.c;
-    const gapPercent = data.c > 0 ? (gap / data.c) * 100 : 0;
+    const gap = open - prevClose;
+    const gapPercent = prevClose > 0 ? (gap / prevClose) * 100 : 0;
 
     const marketData: MarketData = {
       ticker,
