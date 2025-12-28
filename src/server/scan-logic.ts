@@ -5,29 +5,19 @@ import { fetchRedditPosts, getTickerDiscussion, type RedditPost } from "./reddit
 import { aggregateTickerMentions } from "./tickers";
 import { getMultipleMarketData, createFallbackMarketData } from "./market";
 import { filterTickers } from "./ticker-validator";
-import { compositeScore } from "./score";
+
 import { batchSummarizeDiscussions } from "./ai-summarizer";
 import vader from "vader-sentiment";
 
 export interface ScanResult {
   ticker: string;
-  score: number;
   buzzZ: number;
   sentiment: number;
-  gapPct: number;
-  vwapRel: number;
-  volAbnormal: number;
-  atrPct: number;
-  newsCount: number;
-  trend5Day: number;
-  list: string;
-  rationale: string;
+  price?: number;
+  changePercent?: number;
+  volume?: number;
   redditSummary?: {
     summary: string;
-    bullishPoints: string[];
-    bearishPoints: string[];
-    keyQuotes: string[];
-    overallSentiment: 'bullish' | 'bearish' | 'neutral';
     postLinks: string[];
   };
 }
@@ -139,8 +129,8 @@ export async function runDailyScan(): Promise<ScanResult[]> {
   const summariesMap = await batchSummarizeDiscussions(discussions);
   console.log(`✓ Generated ${summariesMap.size} AI summaries`);
 
-  // 8) score + classify
-  console.log("\n🎯 Scoring and classifying tickers...");
+  // 8) Build final results
+  console.log("\n📊 Building final results...");
   const rows = topReddit
     .map(r => {
       // Get market data or use fallback
@@ -150,24 +140,6 @@ export async function runDailyScan(): Promise<ScanResult[]> {
         console.log(`  ⚠️  ${r.ticker}: Using fallback (no market data)`);
         marketData = createFallbackMarketData(r.ticker);
       }
-      
-      const price = marketData.price;
-      const atrPct = marketData.atrPercent / 100; // Convert to decimal
-      const avgDollarVol = marketData.avgVolume * price;
-      
-      const momentum = 0.5; // placeholder feature
-      const quality = (avgDollarVol > 50_000_000 && price > 2 && price < 500) ? 1 : 0;
-
-      const score = compositeScore({
-        buzzZ: r.buzzZ,
-        sentiment: r.sentiment,
-        momentum,
-        quality
-      });
-
-      const list =
-        score >= 0.65 ? "DAY_TRADE" :
-        score >= 0.55 && atrPct < 0.12 ? "SWING" : "SWING";
 
       // Get Reddit summary if available
       const summary = summariesMap.get(r.ticker);
@@ -175,34 +147,19 @@ export async function runDailyScan(): Promise<ScanResult[]> {
 
       return {
         ticker: r.ticker,
-        score: Number(score.toFixed(2)),
         buzzZ: Number(r.buzzZ.toFixed(2)),
         sentiment: Number(r.sentiment.toFixed(2)),
-        gapPct: Number(marketData.gapPercent.toFixed(2)),
-        vwapRel: 1,
-        volAbnormal: Number(marketData.volumeRatio.toFixed(2)),
-        atrPct: Number(atrPct.toFixed(3)),
-        newsCount: 0,
-        trend5Day: Number(marketData.trend5Day.toFixed(2)),
         price: marketData.price,
         changePercent: Number(marketData.gapPercent.toFixed(2)),
         volume: marketData.volume,
-        list,
-        rationale: marketData.price > 0 
-          ? "Reddit buzz + sentiment + Polygon.io market data" 
-          : "Reddit buzz + sentiment only (no market data)",
         redditSummary: summary ? {
           summary: summary.summary,
-          bullishPoints: summary.bullishPoints,
-          bearishPoints: summary.bearishPoints,
-          keyQuotes: summary.keyQuotes,
-          overallSentiment: summary.overallSentiment,
           postLinks: discussion?.postLinks || [],
         } : undefined,
       };
     });
 
-  console.log(`✓ Classified ${rows.length} tickers`);
+  console.log(`✓ Processed ${rows.length} tickers`);
 
   return rows.slice(0, 20); // Return top 20
 }

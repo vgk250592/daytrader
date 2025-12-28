@@ -11,9 +11,6 @@ const openai = new OpenAI({
 export interface TickerSummary {
   ticker: string;
   summary: string;
-  bullishPoints: string[];
-  bearishPoints: string[];
-  keyQuotes: string[];
   overallSentiment: 'bullish' | 'bearish' | 'neutral';
 }
 
@@ -29,9 +26,6 @@ export async function summarizeTickerDiscussion(
     return {
       ticker,
       summary: 'No significant discussion found on Reddit.',
-      bullishPoints: [],
-      bearishPoints: [],
-      keyQuotes: [],
       overallSentiment: 'neutral',
     };
   }
@@ -50,27 +44,24 @@ export async function summarizeTickerDiscussion(
 
 ${postsContext}${commentsContext}
 
-Provide a concise summary in JSON format:
+Provide a comprehensive summary in JSON format:
 {
-  "summary": "2-3 sentence overview of what people are saying",
-  "bullishPoints": ["key bullish argument 1", "key bullish argument 2"],
-  "bearishPoints": ["key bearish argument 1", "key bearish argument 2"],
-  "keyQuotes": ["memorable quote 1", "memorable quote 2"],
+  "summary": "A detailed 3-5 sentence summary capturing the main discussion points, sentiment, key arguments, price targets, catalysts, and any notable risks or opportunities mentioned. Make it unique and specific to this stock's discussion.",
   "overallSentiment": "bullish" | "bearish" | "neutral"
 }
 
-Focus on:
-- Main reasons people are buying/selling
-- Price targets or catalysts mentioned
-- Risks or concerns
-- Keep it concise and actionable`;
+Important:
+- Make the summary comprehensive and unique to this specific ticker
+- Include specific details, numbers, catalysts, or events mentioned
+- Capture the WHY behind the sentiment, not just generic statements
+- Avoid repetitive or template-like language`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1-mini',
       messages: [
         {
           role: 'system',
-          content: 'You are a financial analyst summarizing Reddit stock discussions. Be concise, objective, and focus on key trading insights.',
+          content: 'You are a financial analyst summarizing Reddit stock discussions. Write comprehensive, unique summaries that capture specific details and context for each stock. Avoid generic or repetitive language.',
         },
         {
           role: 'user',
@@ -78,8 +69,8 @@ Focus on:
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 500,
+      temperature: 0.5,
+      max_tokens: 300,
     });
 
     const result = JSON.parse(response.choices[0].message.content || '{}');
@@ -87,9 +78,6 @@ Focus on:
     return {
       ticker,
       summary: result.summary || 'Discussion analysis unavailable.',
-      bullishPoints: result.bullishPoints || [],
-      bearishPoints: result.bearishPoints || [],
-      keyQuotes: result.keyQuotes || [],
       overallSentiment: result.overallSentiment || 'neutral',
     };
   } catch (error) {
@@ -112,10 +100,7 @@ Focus on:
 
     return {
       ticker,
-      summary: `${comments.length} comments discussing ${ticker}. ${sentiment === 'bullish' ? 'Mostly positive sentiment.' : sentiment === 'bearish' ? 'Mostly negative sentiment.' : 'Mixed opinions.'}`,
-      bullishPoints: [],
-      bearishPoints: [],
-      keyQuotes: comments.slice(0, 2).map(c => c.body.slice(0, 150) + '...'),
+      summary: `${comments.length} comments discussing ${ticker}. ${sentiment === 'bullish' ? 'Mostly positive sentiment with focus on upside potential.' : sentiment === 'bearish' ? 'Mostly negative sentiment with concerns about downside.' : 'Mixed opinions with no clear consensus.'}`,
       overallSentiment: sentiment,
     };
   }
