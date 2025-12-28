@@ -20,9 +20,6 @@ export default function TickerTable({ rows, title }: { rows: TickerFeature[]; ti
               <th className="text-left text-slate-300 font-semibold py-3 px-3">
                 Ticker
               </th>
-              <th className="text-left text-slate-300 font-semibold py-3 px-3" title="Composite score based on buzz, sentiment, and quality">
-                Score
-              </th>
               <th className="text-left text-slate-300 font-semibold py-3 px-3" title="Reddit mentions vs average (z-score). 2.0+ = viral">
                 Buzz z
               </th>
@@ -68,7 +65,6 @@ export default function TickerTable({ rows, title }: { rows: TickerFeature[]; ti
                     )}
                   >
                     <td className="font-semibold py-3 px-3">{r.ticker}</td>
-                    <td className="py-3 px-3">{r.score.toFixed(2)}</td>
                     <td className="py-3 px-3">{r.buzzZ.toFixed(2)}</td>
                     <td className={classNames("py-3 px-3", {
                       "text-green-400": r.sentiment > 0.3, 

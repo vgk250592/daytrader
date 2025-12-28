@@ -1,202 +1,217 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+
+import { useEffect, useState } from "react";
 import TickerTable from "@/components/TickerTable";
+import TimelineCarousel from "@/components/TimelineCarousel";
 import type { TickerFeature } from "@/lib/types";
 
-export default function Page() {
-  const [data, setData] = useState<TickerFeature[]>([]);
+export default function HomePage() {
+  const [tickers, setTickers] = useState<TickerFeature[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-  const [scanTime, setScanTime] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<string>("");
+  const [error, setError] = useState<string>("");
 
-  async function loadData() {
-    setLoading(true);
-    setErr(null);
+  useEffect(() => {
+    loadCachedData();
+    // Auto-refresh every 5 minutes
+    const interval = setInterval(loadCachedData, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadCachedData = async () => {
     try {
-      const res = await fetch("/api/run-daily", { method: "POST" });
-      const ct = res.headers.get("content-type") || "";
-      const data = ct.includes("application/json")
-        ? await res.json()
-        : { error: await res.text() };
-
-      if (!res.ok) {
-        setErr(typeof data === "string" ? data : (data.error || "Unknown server error"));
-        setData([]);
-        return;
-      }
+      const res = await fetch("/api/run-daily");
+      const data = await res.json();
       
-      setData(Array.isArray(data.rows) ? data.rows : []);
-      setLastUpdate(data.timestamp || new Date().toISOString());
-      setScanTime(data.scanTime || null);
-    } catch (e: any) {
-      setErr(String(e));
-      setData([]);
+      if (data.success && data.cached) {
+        setTickers(data.tickers);
+        setLastUpdate(data.scanTime);
+        setError("");
+      } else if (data.error) {
+        setError(data.error);
+      }
+    } catch (err) {
+      console.error("Failed to load data:", err);
+      setError("Failed to load data");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = () => {
+    setLoading(true);
+    loadCachedData();
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-slate-300 text-lg">Loading market data...</p>
+        </div>
+      </div>
+    );
   }
 
-  // Auto-load data on first load
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const safe = Array.isArray(data) ? data : [];
-  const day = useMemo(() => safe.filter(d => d.list === "DAY_TRADE"), [safe]);
-  const swing = useMemo(() => safe.filter(d => d.list === "SWING"), [safe]);
-
-  // Calculate insights
-  const topPick = useMemo(() => {
-    return safe.length > 0 ? safe.reduce((max, curr) => curr.score > max.score ? curr : max) : null;
-  }, [safe]);
-
-  const mostBuzzed = useMemo(() => {
-    return safe.length > 0 ? safe.reduce((max, curr) => curr.buzzZ > max.buzzZ ? curr : max) : null;
-  }, [safe]);
-
-  const mostBullish = useMemo(() => {
-    return safe.length > 0 ? safe.reduce((max, curr) => curr.sentiment > max.sentiment ? curr : max) : null;
-  }, [safe]);
-
-  const avgSentiment = useMemo(() => {
-    if (safe.length === 0) return 0;
-    return safe.reduce((sum, t) => sum + t.sentiment, 0) / safe.length;
-  }, [safe]);
-
-  // Format scan time for display
-  const scanTimeDisplay = scanTime 
-    ? scanTime.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
-    : 'Latest';
-
-  // Format last update time
-  const lastUpdateDisplay = lastUpdate 
-    ? new Date(lastUpdate).toLocaleString()
-    : '';
-
   return (
-    <div className="container py-8 space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Reddit Stock Scanner</h1>
-          <p className="text-sm text-slate-400">
-            Daily Reddit buzz + sentiment → day trading & swing ideas
-          </p>
-          {lastUpdateDisplay && (
-            <p className="text-xs text-slate-500 mt-1">
-              📊 {scanTimeDisplay} scan • Last updated: {lastUpdateDisplay}
-            </p>
-          )}
-        </div>
-        <div className="space-x-2">
-          <button className="btn btn-sm" onClick={loadData} disabled={loading}>
-            {loading ? "Loading..." : "🔄 Refresh"}
-          </button>
-          <a className="btn btn-sm" href="https://www.reddit.com/r/wallstreetbets/" target="_blank" rel="noreferrer">
-            Open Reddit
-          </a>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      {/* Header */}
+      <header className="border-b border-slate-700 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                Reddit Stock Scanner
+              </h1>
+              <p className="text-sm text-slate-400 mt-1">
+                AI-powered analysis of r/wallstreetbets
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              {lastUpdate && (
+                <div className="text-right">
+                  <div className="text-xs text-slate-400">Last Updated</div>
+                  <div className="text-sm font-semibold text-slate-300">{lastUpdate}</div>
+                </div>
+              )}
+              <button
+                onClick={handleRefresh}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition text-sm font-semibold flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
-      {loading && safe.length === 0 && (
-        <div className="card p-4 text-slate-300">
-          <div className="flex items-center gap-3">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400"></div>
-            <span>Loading latest scan results...</span>
+      {/* Main Content */}
+      <main className="container mx-auto px-4 py-8 space-y-8">
+        {error && (
+          <div className="card p-4 bg-red-900/20 border border-red-500/50">
+            <p className="text-red-300">{error}</p>
+          </div>
+        )}
+
+        {/* 30-Day Timeline */}
+        <TimelineCarousel />
+
+        {/* Today's Insights */}
+        {tickers.length > 0 && (
+          <div className="card p-6">
+            <div className="grid md:grid-cols-3 gap-6 mb-6">
+              {/* Top Pick */}
+              <div className="bg-gradient-to-br from-purple-900/30 to-purple-800/20 rounded-lg p-4 border border-purple-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">🎯</span>
+                  <span className="text-sm text-purple-300">Top Pick</span>
+                </div>
+                <div className="text-2xl font-bold text-white mb-1">{tickers[0].ticker}</div>
+                <div className="text-sm text-slate-300">
+                  Buzz: {tickers[0].buzzZ.toFixed(2)} | Sentiment: {(tickers[0].sentiment*100).toFixed(0)}%
+                </div>
+              </div>
+
+              {/* Most Buzzed */}
+              <div className="bg-gradient-to-br from-orange-900/30 to-orange-800/20 rounded-lg p-4 border border-orange-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">🔥</span>
+                  <span className="text-sm text-orange-300">Most Buzzed</span>
+                </div>
+                <div className="text-2xl font-bold text-white mb-1">
+                  {[...tickers].sort((a, b) => b.buzzZ - a.buzzZ)[0].ticker}
+                </div>
+                <div className="text-sm text-slate-300">
+                  Buzz: {[...tickers].sort((a, b) => b.buzzZ - a.buzzZ)[0].buzzZ.toFixed(2)} (viral on Reddit)
+                </div>
+              </div>
+
+              {/* Most Bullish */}
+              <div className="bg-gradient-to-br from-green-900/30 to-green-800/20 rounded-lg p-4 border border-green-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">🚀</span>
+                  <span className="text-sm text-green-300">Most Bullish</span>
+                </div>
+                <div className="text-2xl font-bold text-white mb-1">
+                  {[...tickers].sort((a, b) => b.sentiment - a.sentiment)[0].ticker}
+                </div>
+                <div className="text-sm text-slate-300">
+                  Sentiment: {([...tickers].sort((a, b) => b.sentiment - a.sentiment)[0].sentiment*100).toFixed(0)}% positive
+                </div>
+              </div>
+            </div>
+
+            {/* Overall Market Mood */}
+            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">😊</span>
+                  <div>
+                    <div className="text-sm text-slate-400">Overall Market Mood</div>
+                    <div className="text-lg font-semibold text-green-400">
+                      Bullish ({Math.round((tickers.filter(t => t.sentiment > 0).length / tickers.length) * 100)}% positive)
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right text-sm text-slate-400">
+                  Based on {tickers.length} tickers from r/wallstreetbets
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Main Table */}
+        {tickers.length > 0 ? (
+          <TickerTable rows={tickers} title="🔥 Today's Top Stocks" />
+        ) : (
+          <div className="card p-8 text-center">
+            <p className="text-slate-400">No data available. Waiting for next scan...</p>
+          </div>
+        )}
+
+        {/* How to Use Guide */}
+        <div className="card p-6 bg-slate-800/30">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            💡 How to Use This Data
+          </h3>
+          <div className="grid md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <div className="font-semibold text-blue-400 mb-2">📊 Metrics Explained:</div>
+              <ul className="space-y-1 text-slate-300">
+                <li><strong>Buzz:</strong> 0-1 scale, 1.0 = maximum Reddit mentions</li>
+                <li><strong>Sentiment:</strong> -100% (bearish) to +100% (bullish)</li>
+                <li><strong>Gap%:</strong> Price change from yesterday's close</li>
+                <li><strong>Vol x:</strong> Volume vs 5-day average</li>
+                <li><strong>ATR%:</strong> Daily volatility (higher = bigger swings)</li>
+                <li><strong>5D Trend:</strong> 5-day price change percentage</li>
+              </ul>
+            </div>
+            <div>
+              <div className="font-semibold text-orange-400 mb-2">⚠️ Important Notes:</div>
+              <ul className="space-y-1 text-slate-300">
+                <li>✓ Data updates 4x daily (market open, midday, close, after hours)</li>
+                <li>✓ Click "View" in Reddit column for AI-powered summaries</li>
+                <li>✓ Verify tickers before trading (some may be slang/memes)</li>
+                <li>✓ High buzz ≠ good investment. Do your own research!</li>
+                <li>✓ Use 30-day timeline to see Reddit's prediction accuracy</li>
+              </ul>
+            </div>
           </div>
         </div>
-      )}
+      </main>
 
-      {err && <div className="card p-4 text-red-300">API error: {err}</div>}
-      
-      {safe.length === 0 && !err && !loading && (
-        <div className="card p-4 text-slate-300">
-          No scan results available yet. Automated scans run 4x daily at market open, midday, close, and after hours.
+      {/* Footer */}
+      <footer className="border-t border-slate-700 bg-slate-900/50 mt-12">
+        <div className="container mx-auto px-4 py-6 text-center text-sm text-slate-400">
+          <p>Data from r/wallstreetbets • Market data from Polygon.io • AI summaries from GPT-4</p>
+          <p className="mt-2">⚠️ Not financial advice. Trade at your own risk.</p>
         </div>
-      )}
-
-      {/* Insights Panel */}
-      {safe.length > 0 && (
-        <div className="card p-5 space-y-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <span>💡</span> Today's Insights
-          </h2>
-          <div className="grid md:grid-cols-3 gap-4 text-sm">
-            {/* Top Pick */}
-            <div className="bg-slate-700/30 rounded-lg p-4">
-              <div className="text-slate-400 text-xs mb-1">🎯 Top Pick</div>
-              <div className="text-xl font-bold text-blue-400">{topPick?.ticker}</div>
-              <div className="text-xs text-slate-300 mt-1">
-                Score: {topPick?.score.toFixed(2)} | Buzz: {topPick?.buzzZ.toFixed(1)}z | Sentiment: {((topPick?.sentiment || 0) * 100).toFixed(0)}%
-              </div>
-              <div className="text-xs text-slate-400 mt-2">
-                {topPick && topPick.score >= 0.65 ? "Strong day-trade candidate" : "Swing trade candidate"}
-              </div>
-            </div>
-
-            {/* Most Buzzed */}
-            <div className="bg-slate-700/30 rounded-lg p-4">
-              <div className="text-slate-400 text-xs mb-1">🔥 Most Buzzed</div>
-              <div className="text-xl font-bold text-orange-400">{mostBuzzed?.ticker}</div>
-              <div className="text-xs text-slate-300 mt-1">
-                Buzz: {mostBuzzed?.buzzZ.toFixed(2)}z (viral on Reddit)
-              </div>
-              <div className="text-xs text-slate-400 mt-2">
-                {mostBuzzed && mostBuzzed.buzzZ > 2.0 ? "Extremely high mentions" : "Above average mentions"}
-              </div>
-            </div>
-
-            {/* Most Bullish */}
-            <div className="bg-slate-700/30 rounded-lg p-4">
-              <div className="text-slate-400 text-xs mb-1">🚀 Most Bullish</div>
-              <div className="text-xl font-bold text-green-400">{mostBullish?.ticker}</div>
-              <div className="text-xs text-slate-300 mt-1">
-                Sentiment: {((mostBullish?.sentiment || 0) * 100).toFixed(0)}% positive
-              </div>
-              <div className="text-xs text-slate-400 mt-2">
-                {mostBullish && mostBullish.sentiment > 0.8 ? "Extremely bullish sentiment" : "Bullish sentiment"}
-              </div>
-            </div>
-          </div>
-
-          {/* Market Mood */}
-          <div className="border-t border-slate-700 pt-4">
-            <div className="flex items-center justify-between text-sm">
-              <div>
-                <span className="text-slate-400">Overall Market Mood:</span>
-                <span className={`ml-2 font-semibold ${avgSentiment > 0.6 ? 'text-green-400' : avgSentiment > 0.3 ? 'text-yellow-400' : 'text-red-400'}`}>
-                  {avgSentiment > 0.6 ? '😊 Bullish' : avgSentiment > 0.3 ? '😐 Neutral' : '😟 Bearish'}
-                </span>
-                <span className="ml-1 text-slate-400">({(avgSentiment * 100).toFixed(0)}% positive)</span>
-              </div>
-              <div className="text-xs text-slate-400">
-                Based on {safe.length} tickers from r/wallstreetbets
-              </div>
-            </div>
-          </div>
-
-          {/* Trading Tips */}
-          <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 text-xs text-slate-300">
-            <div className="font-semibold text-blue-300 mb-1">💡 How to Use This Data:</div>
-            <ul className="space-y-1 ml-4 list-disc">
-              <li><strong>Day-Trade Watch</strong>: High scores (0.65+) = momentum plays for 1-3 days</li>
-              <li><strong>Swing Candidates</strong>: Medium scores (0.55-0.64) = hold for 1-2 weeks</li>
-              <li><strong>Buzz z</strong>: 2.0+ = viral on Reddit, high volume expected</li>
-              <li><strong>Sentiment</strong>: Green = bullish, Red = bearish (or short opportunity)</li>
-              <li><strong>Trend</strong>: ↑↑ = strong uptrend, ↓↓ = strong downtrend, → = flat</li>
-              <li><strong>⚠️ Warning</strong>: Verify tickers are real stocks before trading. Some may be Reddit slang (e.g., "TLDR", "EPS")</li>
-            </ul>
-          </div>
-        </div>
-      )}
-
-      <section className="grid md:grid-cols-2 gap-6">
-        <TickerTable title="Day-Trade Watch" rows={day} />
-        <TickerTable title="Swing Candidates" rows={swing} />
-      </section>
-
-      <footer className="text-xs text-slate-500">
-        Experimental tool. Not financial advice. Paper-trade first. • Automated scans run 4x daily at 9:30 AM, 12:00 PM, 4:00 PM, and 8:00 PM EST.
       </footer>
     </div>
   );

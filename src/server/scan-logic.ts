@@ -74,16 +74,15 @@ export async function runDailyScan(): Promise<ScanResult[]> {
   // Filter tickerMentions to only include valid tickers
   const validTickerMentions = tickerMentions.filter(tm => validTickers.includes(tm.ticker));
   
-  // Calculate buzz z-scores
+  // Calculate normalized buzz scores (0-1 range)
   console.log("📊 Calculating buzz scores...");
   const counts = validTickerMentions.map(t => t.count);
-  const avgCount = counts.reduce((a, b) => a + b, 0) / counts.length;
-  const stdCount = Math.sqrt(
-    counts.reduce((sum, c) => sum + Math.pow(c - avgCount, 2), 0) / counts.length
-  );
+  const maxCount = Math.max(...counts);
+  const minCount = Math.min(...counts);
 
   const reddit = validTickerMentions.map(tm => {
-    const buzzZ = stdCount > 0 ? (tm.count - avgCount) / stdCount : 0;
+    // Normalize to 0-1 range
+    const buzzZ = maxCount > minCount ? (tm.count - minCount) / (maxCount - minCount) : 0.5;
     
     // Calculate sentiment using vader
     const allText = tm.posts.map(p => p.text).join(" ");
