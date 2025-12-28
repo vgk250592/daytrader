@@ -1,21 +1,30 @@
 // src/app/api/run-daily/route.ts
-// IMPROVED VERSION - Shows tickers even if market data fails
+// ✅ UPDATED VERSION - Polygon.io integration with existing structure
 
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import { fetchRedditPosts } from "@/server/reddit";
 import { aggregateTickerMentions } from "@/server/tickers";
-import { getMarketFeatures } from "@/server/market";
+import { getMultipleMarketData, createFallbackMarketData } from "@/server/market";
+import { filterTickers } from "@/server/ticker-validator";
 import { compositeScore } from "@/server/score";
+import { getCachedData, setCachedData } from "@/server/cache";
 import vader from "vader-sentiment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  console.log("\n🚀 Starting daily check...");
+  console.log("\n🚀 Starting daily check with Polygon.io...");
   
   try {
+    // Check cache first (15 minute TTL)
+    const cached = getCachedData('daily-scan');
+    if (cached) {
+      console.log('✅ Returning cached results\n');
+      return NextResponse.json(cached);
+    }
+
     // 1) fetch reddit data
     console.log("📡 Fetching Reddit posts...");
     const posts = await fetchRedditPosts("wallstreetbets", 100);
@@ -37,15 +46,35 @@ export async function POST() {
       });
     }
     
+    // 3) Validate tickers using smart validator
+    console.log("✅ Validating tickers...");
+    const rawTickers = tickerMentions.map(tm => tm.ticker);
+    const { valid: validTickers, warnings } = filterTickers(rawTickers);
+    console.log(`✓ Valid tickers: ${validTickers.length}/${rawTickers.length}`);
+    
+    if (warnings.length > 0) {
+      console.log(`⚠️  Not in NASDAQ database (will try API): ${warnings.slice(0, 5).join(', ')}${warnings.length > 5 ? '...' : ''}`);
+    }
+    
+    if (validTickers.length === 0) {
+      return NextResponse.json({ 
+        rows: [],
+        message: "No valid tickers found after filtering"
+      });
+    }
+    
+    // Filter tickerMentions to only include valid tickers
+    const validTickerMentions = tickerMentions.filter(tm => validTickers.includes(tm.ticker));
+    
     // Calculate buzz z-scores
     console.log("📊 Calculating buzz scores...");
-    const counts = tickerMentions.map(t => t.count);
+    const counts = validTickerMentions.map(t => t.count);
     const avgCount = counts.reduce((a, b) => a + b, 0) / counts.length;
     const stdCount = Math.sqrt(
       counts.reduce((sum, c) => sum + Math.pow(c - avgCount, 2), 0) / counts.length
     );
 
-    const reddit = tickerMentions.map(tm => {
+    const reddit = validTickerMentions.map(tm => {
       const buzzZ = stdCount > 0 ? (tm.count - avgCount) / stdCount : 0;
       
       // Calculate sentiment using vader
@@ -64,36 +93,40 @@ export async function POST() {
 
     console.log(`✓ Calculated buzz scores for ${reddit.length} tickers`);
 
-    // 3) take the top 30 symbols by reddit score/buzz (reduced from 60 to avoid rate limits)
+    // 4) take the top 30 symbols by reddit score/buzz
     const topReddit = reddit
       .sort((a, b) => b.buzzZ - a.buzzZ)
       .slice(0, 30);
     
     const symbols = topReddit.map(r => r.ticker);
 
-    console.log(`📈 Fetching market data for top ${symbols.length} tickers...`);
+    console.log(`📈 Fetching market data for top ${symbols.length} tickers from Polygon.io...`);
     console.log(`Top tickers: ${symbols.slice(0, 10).join(", ")}`);
 
-    // 4) add market features (ATR%, $-vol, etc.)
-    const market = await getMarketFeatures(symbols);
-    const marketCount = Object.keys(market).length;
-    console.log(`✓ Fetched market data for ${marketCount} tickers`);
+    // 5) Fetch market data using Polygon.io
+    const marketDataMap = await getMultipleMarketData(symbols);
+    const marketCount = marketDataMap.size;
+    console.log(`✓ Fetched market data for ${marketCount}/${symbols.length} tickers (${Math.round(marketCount/symbols.length*100)}% success rate)`);
     
     if (marketCount === 0) {
-      console.warn("⚠️  No market data fetched - Yahoo Finance may be rate limiting");
-      console.warn("⚠️  Returning tickers with Reddit data only");
+      console.warn("⚠️  No market data fetched - check Polygon.io API key");
     }
 
-    // 5) score + classify
+    // 6) score + classify
     console.log("🎯 Scoring and classifying tickers...");
     const rows = topReddit
       .map(r => {
-        const m = market[r.ticker];
+        // Get market data or use fallback
+        let marketData = marketDataMap.get(r.ticker);
         
-        // If no market data, use defaults but still include the ticker
-        const price = m?.price || 0;
-        const atrPct = m?.atrPct || 0;
-        const avgDollarVol = m?.avgDollarVol || 0;
+        if (!marketData) {
+          console.log(`  ⚠️  ${r.ticker}: Using fallback (no market data)`);
+          marketData = createFallbackMarketData(r.ticker);
+        }
+        
+        const price = marketData.price;
+        const atrPct = marketData.atrPercent / 100; // Convert to decimal
+        const avgDollarVol = marketData.avgVolume * price;
         
         const momentum = 0.5; // placeholder feature
         const quality = (avgDollarVol > 50_000_000 && price > 2 && price < 500) ? 1 : 0;
@@ -114,19 +147,21 @@ export async function POST() {
           score: Number(score.toFixed(2)),
           buzzZ: Number(r.buzzZ.toFixed(2)),
           sentiment: Number(r.sentiment.toFixed(2)),
-          gapPct: 0,
+          gapPct: Number(marketData.gapPercent.toFixed(2)),
           vwapRel: 1,
-          volAbnormal: 1,
+          volAbnormal: Number(marketData.volumeRatio.toFixed(2)),
           atrPct: Number(atrPct.toFixed(3)),
           newsCount: 0,
           list,
-          rationale: m ? "Reddit buzz + sentiment + liquidity filter" : "Reddit buzz + sentiment only (no market data)"
+          rationale: marketData.price > 0 
+            ? "Reddit buzz + sentiment + Polygon.io market data" 
+            : "Reddit buzz + sentiment only (no market data)"
         };
       });
 
     console.log(`✓ Classified ${rows.length} tickers`);
 
-    // 6) persist a line per run for your rolling backtest
+    // 7) persist a line per run for your rolling backtest
     try {
       await fs.mkdir("data", { recursive: true });
       const today = new Date().toISOString().slice(0, 10);
@@ -135,17 +170,20 @@ export async function POST() {
       console.log("✓ Saved results to data/signals.jsonl");
     } catch (fsError: any) {
       console.warn("⚠️  Could not save to file:", fsError.message);
-      // Don't fail the request if file save fails
     }
 
     const topRows = rows.slice(0, 20);
     console.log(`✅ Returning ${topRows.length} tickers to client`);
     console.log("Sample tickers:", topRows.slice(0, 5).map(r => `${r.ticker}(${r.score})`).join(", "));
 
-    return NextResponse.json({ rows: topRows });
+    const result = { rows: topRows };
+    
+    // Cache results for 15 minutes
+    setCachedData('daily-scan', result, 15 * 60 * 1000);
+
+    return NextResponse.json(result);
     
   } catch (e: any) {
-    // Show the REAL error in your terminal and return it to the client as JSON
     const status = e?.response?.status;
     const payload = e?.response?.data ?? e?.message ?? String(e);
     console.error("❌ run-daily error:", status ?? "no-status", payload);
